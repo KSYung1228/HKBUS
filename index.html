@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HK Bus (KMB/LWB)</title>
+
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* Mobile Optimizations */
+        body {
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .ios-safe-area {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800 h-screen overflow-hidden flex justify-center">
+
+    <div id="root" class="w-full max-w-md h-full bg-white shadow-2xl relative flex flex-col"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useCallback } = React;
+
+        // --- ICONS (SVG) ---
+        const Icons = {
+            Bus: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 6v6" /><path d="M15 6v6" /><path d="M2 12h19.6" /><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3" /><circle cx="7" cy="18" r="2" /><path d="M9 18h5" /><circle cx="16" cy="18" r="2" /></svg>,
+            Search: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>,
+            MapPin: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></svg>,
+            ChevronRight: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>,
+            ChevronLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>,
+            RefreshCw: ({ className }) => <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>,
+            ArrowRightLeft: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m16 17 4-4-4-4" /><path d="M20 13H4" /><path d="m8 7-4 4 4 4" /><path d="M4 11h16" /></svg>,
+            AlertCircle: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>,
+            MapIcon: () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" /><line x1="9" x2="9" y1="3" y2="18" /><line x1="15" x2="15" y1="6" y2="21" /></svg>
+        };
+
+        // --- API CONFIGURATION ---
+        const BASE_URL = 'https://data.etabus.gov.hk/v1/transport/kmb';
+
+        // --- UTILITIES ---
+        const getDistanceFromLatLonInKm = (lat1, lon1, lat2, lon2) => {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c * 1000; // meters
+        };
+
+        // --- COMPONENTS ---
+
+        const Loading = ({ message }) => (
+            <div className="flex flex-col items-center justify-center p-8 text-gray-500 h-64">
+                <Icons.RefreshCw className="w-8 h-8 animate-spin mb-3 text-red-600" />
+                <p className="text-sm font-medium animate-pulse">{message || 'Loading...'}</p>
+            </div>
+        );
+
+        const ErrorMsg = ({ message, retry }) => (
+            <div className="flex flex-col items-center justify-center p-8 text-center bg-red-50 m-4 rounded-xl border border-red-100">
+                <div className="text-red-500 mb-2"><Icons.AlertCircle /></div>
+                <p className="text-gray-800 font-medium mb-3 text-sm">{message}</p>
+                {retry && (
+                    <button onClick={retry} className="px-4 py-2 bg-red-600 text-white rounded-full text-sm hover:bg-red-700 transition shadow-sm">
+                        Try Again
+                    </button>
+                )}
+            </div>
+        );
+
+        const ETADisplay = ({ stopId, route, serviceType }) => {
+            const [etas, setEtas] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+
+            const fetchETA = useCallback(async () => {
+                setLoading(true);
+                setError(null);
+                try {
+                    const res = await fetch(`${BASE_URL}/eta/${stopId}/${route}/${serviceType}`);
+                    const data = await res.json();
+                    if (data && data.data) {
+                        const relevant = data.data.filter(item =>
+                            item.route === route && !!item.eta
+                        );
+                        // Sort by time
+                        relevant.sort((a, b) => new Date(a.eta) - new Date(b.eta));
+                        setEtas(relevant);
+                    }
+                } catch (err) {
+                    setError('Failed to load');
+                } finally {
+                    setLoading(false);
+                }
+            }, [stopId, route, serviceType]);
+
+            useEffect(() => {
+                fetchETA();
+                const interval = setInterval(fetchETA, 60000);
+                return () => clearInterval(interval);
+            }, [fetchETA]);
+
+            if (loading) return <div className="p-3 text-center text-xs text-gray-400">Loading schedules...</div>;
+            if (error) return <div className="p-3 text-center text-xs text-red-400">Unavailable</div>;
+            if (etas.length === 0) return <div className="p-3 text-center text-xs text-gray-400">No scheduled buses</div>;
+
+            return (
+                <div className="flex gap-2 overflow-x-auto py-2 px-1">
+                    {etas.map((item, idx) => {
+                        const date = new Date(item.eta);
+                        const now = new Date();
+                        const diffMs = date - now;
+                        const diffMins = Math.max(0, Math.floor(diffMs / 60000));
+
+                        return (
+                            <div key={idx} className="flex-shrink-0 bg-red-50 border border-red-100 rounded-lg p-2 min-w-[70px] text-center shadow-sm">
+                                <div className="text-lg font-bold text-red-600 leading-none">
+                                    {diffMins === 0 ? 'Now' : <>{diffMins}<span className="text-[10px] font-normal ml-0.5">min</span></>}
+                                </div>
+                                <div className="text-[10px] text-gray-500 mt-1">
+                                    {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            );
+        };
+
+        const RouteDetails = ({ routeData, allStops, ensureStopsLoaded, onBack }) => {
+            const [direction, setDirection] = useState('outbound');
+            const [stops, setStops] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [expandedStop, setExpandedStop] = useState(null);
+            const [stopsLoaded, setStopsLoaded] = useState(false);
+            const [loadError, setLoadError] = useState(null);
+
+            const origin = direction === 'outbound' ? routeData.orig_tc : routeData.dest_tc;
+            const dest = direction === 'outbound' ? routeData.dest_tc : routeData.orig_tc;
+
+            // Ensure we have the stop database loaded to show names
+            useEffect(() => {
+                setLoadError(null);
+                if (allStops.length === 0) {
+                    ensureStopsLoaded()
+                        .then(() => setStopsLoaded(true))
+                        .catch(err => {
+                            setLoadError("Could not download stop names.");
+                            setStopsLoaded(true); // Allow proceed, just without full names if validation fails
+                        });
+                } else {
+                    setStopsLoaded(true);
+                }
+            }, [allStops]);
+
+            useEffect(() => {
+                if (!stopsLoaded) return;
+
+                const fetchRouteStops = async () => {
+                    setLoading(true);
+                    try {
+                        const res = await fetch(`${BASE_URL}/route-stop/${routeData.route}/${direction}/${routeData.service_type}`);
+                        const data = await res.json();
+
+                        const mappedStops = data.data.map(item => {
+                            const stopInfo = allStops.find(s => s.stop === item.stop);
+                            return { ...item, ...stopInfo };
+                        });
+                        setStops(mappedStops);
+                    } catch (err) {
+                        console.error("Failed stops", err);
+                    } finally {
+                        setLoading(false);
+                    }
+                };
+
+                fetchRouteStops();
+            }, [routeData, direction, stopsLoaded, allStops]);
+
+            return (
+                <div className="h-full flex flex-col bg-white animate-fade-in">
+                    <div className="bg-red-600 text-white p-4 shadow-md z-10 sticky top-0">
+                        <button onClick={onBack} className="flex items-center text-sm opacity-90 mb-2 hover:opacity-100">
+                            <Icons.ChevronLeft /> <span className="ml-1">Back</span>
+                        </button>
+                        <div className="flex justify-between items-start">
+                            <div>
+                                <h1 className="text-3xl font-bold flex items-center gap-2">
+                                    {routeData.route}
+                                </h1>
+                                <div className="text-sm font-medium opacity-90 mt-1 flex items-center gap-2">
+                                    <span>{origin}</span>
+                                    <div className="w-4"><Icons.ArrowRightLeft /></div>
+                                    <span>{dest}</span>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setDirection(prev => prev === 'outbound' ? 'inbound' : 'outbound')}
+                                className="bg-white/20 p-2 rounded-full hover:bg-white/30 transition backdrop-blur-sm mt-1"
+                            >
+                                <Icons.RefreshCw className="w-5 h-5 text-white" />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto bg-gray-50 scroll-smooth">
+                        {!stopsLoaded || loading ? (
+                            <Loading message={!stopsLoaded ? "Downloading Stop Database..." : "Loading Route Stops..."} />
+                        ) : loadError ? (
+                            <ErrorMsg message={loadError} retry={() => window.location.reload()} />
+                        ) : stops.length === 0 ? (
+                            <div className="p-8 text-center text-gray-500">
+                                No stops found for this direction.
+                            </div>
+                        ) : (
+                            <div className="relative pb-20">
+                                <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-gray-300 z-0"></div>
+                                {stops.map((stop, index) => {
+                                    const isExpanded = expandedStop === stop.stop;
+                                    return (
+                                        <div key={stop.stop + index} className="relative z-10">
+                                            <button
+                                                onClick={() => setExpandedStop(isExpanded ? null : stop.stop)}
+                                                className={`w-full text-left p-4 pl-12 border-b border-gray-100 hover:bg-white transition-colors ${isExpanded ? 'bg-white' : ''}`}
+                                            >
+                                                <div className={`absolute left-4 top-6 w-4 h-4 rounded-full border-2 ${isExpanded ? 'bg-red-600 border-red-600 scale-110' : 'bg-white border-gray-400'} transition-all flex items-center justify-center`}>
+                                                    {isExpanded && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                                                </div>
+                                                <div>
+                                                    <h3 className={`font-medium text-lg leading-tight ${isExpanded ? 'text-red-600' : 'text-gray-800'}`}>
+                                                        {stop.name_tc || `Stop ${stop.stop}`}
+                                                    </h3>
+                                                    <p className="text-sm text-gray-500 mt-0.5">{stop.name_en}</p>
+                                                </div>
+                                            </button>
+                                            {isExpanded && (
+                                                <div className="bg-white pl-12 pr-4 pb-4 border-b border-gray-100 shadow-inner">
+                                                    <ETADisplay stopId={stop.stop} route={routeData.route} serviceType={routeData.service_type} />
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const App = () => {
+            const [view, setView] = useState('search');
+            const [routes, setRoutes] = useState([]);
+            const [allStops, setAllStops] = useState([]);
+            const [loadingInitial, setLoadingInitial] = useState(true);
+            const [stopsLoading, setStopsLoading] = useState(false);
+
+            const [searchQuery, setSearchQuery] = useState('');
+            const [selectedRoute, setSelectedRoute] = useState(null);
+
+            const [nearbyStops, setNearbyStops] = useState([]);
+            const [locLoading, setLocLoading] = useState(false);
+            const [locError, setLocError] = useState(null);
+
+            // 1. Light initialization (Routes only)
+            useEffect(() => {
+                const initData = async () => {
+                    try {
+                        const routeRes = await fetch(`${BASE_URL}/route`);
+                        const routeData = await routeRes.json();
+                        const uniqueRoutes = {};
+                        routeData.data.forEach(r => {
+                            if (!uniqueRoutes[r.route]) uniqueRoutes[r.route] = r;
+                        });
+                        setRoutes(Object.values(uniqueRoutes).sort((a, b) => a.route.localeCompare(b.route, undefined, { numeric: true })));
+                    } catch (e) {
+                        console.error("Init failed", e);
+                    } finally {
+                        setLoadingInitial(false);
+                    }
+                };
+                initData();
+            }, []);
+
+            // 2. Heavy initialization (Stops) - On Demand with RETRY Logic
+            const ensureStopsLoaded = useCallback(async () => {
+                if (allStops.length > 0) return;
+                setStopsLoading(true);
+
+                let attempts = 0;
+                const maxAttempts = 3;
+
+                while (attempts < maxAttempts) {
+                    try {
+                        const stopRes = await fetch(`${BASE_URL}/stop`);
+                        if (!stopRes.ok) throw new Error("Network response was not ok");
+                        const stopData = await stopRes.json();
+                        setAllStops(stopData.data);
+                        setStopsLoading(false);
+                        return; // Success, exit function
+                    } catch (e) {
+                        attempts++;
+                        console.error(`Attempt ${attempts} failed`, e);
+                        if (attempts >= maxAttempts) {
+                            setStopsLoading(false);
+                            // Throw error to be caught by the caller for UI display
+                            throw new Error("Failed to download stop database after multiple attempts.");
+                        }
+                        // Wait 1s before retry
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+            }, [allStops]);
+
+            const filteredRoutes = useMemo(() => {
+                const q = searchQuery.toUpperCase();
+                return routes.filter(r => r.route.includes(q));
+            }, [routes, searchQuery]);
+
+            // We'll fix the closure staleness by using a Ref for stops
+            const stopsRef = React.useRef(allStops);
+            useEffect(() => { stopsRef.current = allStops; }, [allStops]);
+
+            const executeLocationSearch = async () => {
+                setView('nearby');
+                setLocLoading(true);
+                setLocError(null);
+
+                // 1. Load Data
+                if (stopsRef.current.length === 0) {
+                    try {
+                        await ensureStopsLoaded();
+                    } catch (err) {
+                        setLocError("Connection failed: Could not download stop database. Please check your internet.");
+                        setLocLoading(false);
+                        return;
+                    }
+                }
+
+                // 2. Get Location
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        const { latitude, longitude } = pos.coords;
+                        const currentStops = stopsRef.current; // access fresh data
+
+                        if (currentStops.length > 0) {
+                            const withDist = currentStops.map(s => ({
+                                ...s,
+                                dist: getDistanceFromLatLonInKm(latitude, longitude, parseFloat(s.lat), parseFloat(s.long))
+                            }));
+                            const sorted = withDist.sort((a, b) => a.dist - b.dist).slice(0, 15);
+                            setNearbyStops(sorted);
+                        }
+                        setLocLoading(false);
+                    },
+                    (err) => {
+                        setLocError("GPS Error: " + err.message);
+                        setLocLoading(false);
+                    }
+                );
+            };
+
+
+            if (loadingInitial) return (
+                <div className="flex-1 flex flex-col items-center justify-center bg-gray-50">
+                    <Loading message="Starting HK Bus..." />
+                </div>
+            );
+
+            if (view === 'detail' && selectedRoute) {
+                return (
+                    <RouteDetails
+                        routeData={selectedRoute}
+                        allStops={allStops}
+                        ensureStopsLoaded={ensureStopsLoaded}
+                        onBack={() => setView('search')}
+                    />
+                );
+            }
+
+            return (
+                <div className="flex flex-col h-full overflow-hidden">
+                    {/* Top Bar */}
+                    <div className="bg-red-600 px-4 py-3 shadow-md z-10 shrink-0">
+                        <div className="flex items-center justify-between mb-3">
+                            <h1 className="text-white font-bold text-xl flex items-center gap-2">
+                                <div className="bg-white text-red-600 rounded p-1"><Icons.Bus /></div>
+                                <span>HK Bus</span>
+                            </h1>
+                        </div>
+                        <div className="flex p-1 bg-red-700/50 rounded-lg">
+                            <button onClick={() => setView('search')} className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-all ${view === 'search' ? 'bg-white text-red-600 shadow-sm' : 'text-red-100 hover:bg-white/10'}`}>
+                                <span className="mr-2"><Icons.Search /></span> Routes
+                            </button>
+                            <button onClick={executeLocationSearch} className={`flex-1 flex items-center justify-center py-2 rounded-md text-sm font-medium transition-all ${view === 'nearby' ? 'bg-white text-red-600 shadow-sm' : 'text-red-100 hover:bg-white/10'}`}>
+                                <span className="mr-2"><Icons.MapPin /></span> Nearby
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto relative">
+                        {stopsLoading && (
+                            <div className="absolute top-0 left-0 right-0 z-50 bg-blue-600 text-white text-xs py-1 px-2 text-center animate-pulse">
+                                Downloading Stop Database (5MB)...
+                            </div>
+                        )}
+
+                        {view === 'search' && (
+                            <div className="p-4">
+                                <div className="relative mb-4">
+                                    <div className="absolute left-3 top-3.5 text-gray-400"><Icons.Search /></div>
+                                    <input
+                                        type="text"
+                                        placeholder="Search route (e.g. 1A, 101)..."
+                                        className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 shadow-sm focus:outline-none focus:ring-2 focus:ring-red-500 text-lg bg-gray-50 focus:bg-white transition-all"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-3">
+                                    {filteredRoutes.slice(0, 50).map(route => (
+                                        <button
+                                            key={route.route}
+                                            onClick={() => { setSelectedRoute(route); setView('detail'); }}
+                                            className="w-full flex items-center justify-between p-4 bg-white rounded-xl shadow-sm border border-gray-100 hover:border-red-200 active:scale-[0.98] transition-all"
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <div className="w-12 h-12 bg-red-50 rounded-lg flex items-center justify-center text-red-600 font-bold text-xl">
+                                                    {route.route}
+                                                </div>
+                                                <div className="text-left">
+                                                    <div className="text-gray-800 font-bold">{route.dest_tc}</div>
+                                                    <div className="text-gray-400 text-xs mt-0.5">To: {route.dest_en}</div>
+                                                </div>
+                                            </div>
+                                            <div className="text-gray-300"><Icons.ChevronRight /></div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {view === 'nearby' && (
+                            <div className="p-4">
+                                <div className="mb-4 flex items-center justify-between">
+                                    <h2 className="text-lg font-bold text-gray-800">Nearest Stops</h2>
+                                    <button onClick={executeLocationSearch} className="text-red-600 text-sm font-medium hover:underline flex items-center">
+                                        <Icons.RefreshCw className="w-3 h-3 mr-1" /> Refresh
+                                    </button>
+                                </div>
+
+                                {locLoading ? (
+                                    <Loading message={stopsLoading ? "Downloading Database..." : "Locating..."} />
+                                ) : locError ? (
+                                    <ErrorMsg message={locError} retry={executeLocationSearch} />
+                                ) : nearbyStops.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {nearbyStops.map(stop => (
+                                            <div key={stop.stop} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                                <div className="p-4 flex items-center justify-between">
+                                                    <div className="flex items-center gap-3 overflow-hidden">
+                                                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0 text-blue-600">
+                                                            <Icons.MapPin />
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <h3 className="font-bold text-gray-800 truncate">{stop.name_tc}</h3>
+                                                            <p className="text-xs text-gray-500 truncate">{stop.name_en}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end shrink-0 ml-2">
+                                                        <span className="text-blue-600 font-bold text-sm">{Math.round(stop.dist)}m</span>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-gray-50 p-2 text-center text-xs text-gray-500 border-t border-gray-100">
+                                                    (Select a route from the main list to view times)
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-center py-10 text-gray-400">
+                                        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3"><Icons.MapIcon /></div>
+                                        <p>Tap "Nearby" to find stops.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
